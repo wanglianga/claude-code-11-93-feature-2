@@ -1,15 +1,19 @@
 // 司机端：按当前线路登记 到站 / 扫码 / 称重 / 满溢 / 封路，支持离线队列与转场卸载
+// 另含：转运站窗口预约（到场 / 排队 / 过磅）与调度安排（等待 / 改道）确认
 import React, { useMemo, useState } from 'react';
 import type { Snapshot } from '../lib/db';
-import type { Account, Station } from '../types';
+import type { Account, Booking, Station } from '../types';
 import { fmtMin } from '../types';
 import {
   addClosure, currentVersionByVehicle, divertToDump, flushOutbox,
   recheckVehicle, submitDriverAction,
 } from '../lib/actions';
+import {
+  ackInstruction, driverArriveTransfer, driverWeighTransfer, queuePosition,
+} from '../lib/transfer';
 import { shortestPath } from '../lib/graph';
 import { credentialOf } from '../lib/seed';
-import { StationBadge, VEHICLE_COLORS } from './Shared';
+import { BookingBadge, StationBadge, VEHICLE_COLORS } from './Shared';
 
 export function DriverView({ snap, account }: { snap: Snapshot; account: Account }) {
   const vehicle = snap.vehicles.find((v) => v.id === account.vehicleId)!;
@@ -22,6 +26,8 @@ export function DriverView({ snap, account }: { snap: Snapshot; account: Account
   const [msg, setMsg] = useState('');
   const [rejectInfo, setRejectInfo] = useState<{ station: Station; ton: number; remaining: number } | null>(null);
   const [closureMin, setClosureMin] = useState(60);
+  const [weighBooking, setWeighBooking] = useState<Booking | null>(null);
+  const [weighBookingTon, setWeighBookingTon] = useState('');
 
   const stops = (rv?.stopIds ?? [])
     .map((id) => snap.stations.find((s) => s.id === id)!)
@@ -31,6 +37,37 @@ export function DriverView({ snap, account }: { snap: Snapshot; account: Account
   const myReceipts = snap.receipts.filter((r) => r.vehicleId === vehicle.id).slice().reverse().slice(0, 15);
   const violations = recheckVehicle(snap, vehicle.id);
   const remaining = Math.round((vehicle.capacityTon - vehicle.loadTon) * 100) / 100;
+  const myBookings = snap.bookings.filter((b) => b.vehicleId === vehicle.id && b.status !== 'diverted');
+  const myInstructions = snap.instructions.filter((i) => i.vehicleId === vehicle.id && !i.acked);
+
+  const arriveTransfer = async (b: Booking) => {
+    const r = await driverArriveTransfer(snap, b.id, account.name);
+    setMsg(r.ok ? `${b.id} 已到场登记` : `到场被拒：${r.reason}`);
+  };
+
+  const doWeighTransfer = async () => {
+    if (!weighBooking) return;
+    const ton = parseFloat(weighBookingTon);
+    if (isNaN(ton) || ton <= 0) {
+      setMsg('请输入有效的实称吨数');
+      return;
+    }
+    const b = weighBooking;
+    setWeighBooking(null);
+    const r = await driverWeighTransfer(snap, b.id, ton, account.name);
+    if (r.ok) {
+      setMsg(`${b.id} 过磅完成：实收 ${ton.toFixed(1)} 吨（估重不登记为实收）`
+        + (r.releasedTon ? `，释放锁量 ${r.releasedTon.toFixed(1)} 吨` : '')
+        + (r.promoted && r.promoted.length > 0 ? `，${r.promoted.join('、')} 补锁成功` : ''));
+    } else {
+      setMsg(`过磅被拒：${r.reason}`);
+    }
+  };
+
+  const ackInstr = async (id: string) => {
+    await ackInstruction(snap, id, account.name);
+    setMsg('已确认收到调度安排');
+  };
 
   const doAction = async (action: 'arrive' | 'scan' | 'overflow', station: Station) => {
     const res = await submitDriverAction(snap, {
@@ -129,6 +166,71 @@ export function DriverView({ snap, account }: { snap: Snapshot; account: Account
             </div>
           )}
           {msg && <div className="demo-msg">{msg}</div>}
+        </div>
+
+        {myInstructions.length > 0 && (
+          <div className="panel instr-panel">
+            <h3>调度安排（待确认）</h3>
+            {myInstructions.map((i) => (
+              <div key={i.id} className="alert strong instr">
+                {i.kind === 'wait' ? '⏳ 等待安排' : '🔀 改道安排'}（{fmtMin(i.createdAtMin)} {i.by}）：{i.message}
+                <div className="btn-row">
+                  <button className="btn small primary" onClick={() => ackInstr(i.id)}>收到，确认执行</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="panel">
+          <h3>转运站预约（窗口 / 排队 / 过磅）</h3>
+          <table className="tbl small">
+            <thead>
+              <tr><th>预约</th><th>转运站 / 窗口</th><th>估重</th><th>实称</th><th>状态</th><th>操作</th></tr>
+            </thead>
+            <tbody>
+              {myBookings.map((b) => {
+                const st = snap.transferStations.find((s) => s.id === b.stationId);
+                const w = st?.windows.find((x) => x.id === b.windowId);
+                if (!st || !w) return null;
+                const pos = queuePosition(w, snap.bookings, b.id);
+                const ahead = pos != null ? pos - 1 : 0;
+                const canArrive = b.status !== 'weighed' && b.arrivedAtMin == null && b.status !== 'queued';
+                const canWeigh = b.status === 'queued' || (st.mode === 'lock' && b.status === 'locked' && b.arrivedAtMin != null);
+                return (
+                  <tr key={b.id} className={b.status === 'weighed' ? 'row-done' : ''}>
+                    <td className="mono small">{b.id}</td>
+                    <td>
+                      {st.name} {w.id}
+                      <div className="muted tiny">{fmtMin(w.startMin)}–{fmtMin(w.endMin)} · 容量 {w.capacityTon.toFixed(1)}t
+                        {w.suspended && <span className="badge red">临时停收</span>}
+                        {st.mode === 'queue' && pos != null && <span className="badge indigo">第 {pos} 位{ahead > 0 ? `（前车 ${ahead} 辆）` : ''}</span>}
+                      </div>
+                    </td>
+                    <td className="mono">{b.estTon.toFixed(1)}t</td>
+                    <td className="mono">{b.actualTon != null ? `${b.actualTon.toFixed(1)}t` : '—'}</td>
+                    <td>
+                      <BookingBadge status={b.status} />
+                      {b.note && <div className="muted tiny">{b.note}</div>}
+                    </td>
+                    <td className="actions">
+                      {canArrive && <button className="btn small" onClick={() => arriveTransfer(b)}>到场</button>}
+                      {canWeigh && (
+                        <button className="btn small primary" onClick={() => { setWeighBooking(b); setWeighBookingTon(String(b.estTon)); }}>过磅</button>
+                      )}
+                      {b.status === 'weighed' && <span className="ok small">✓ {fmtMin(b.weighedAtMin!)} 实收 {b.actualTon!.toFixed(1)}t</span>}
+                      {b.status === 'blocked' && <span className="bad small">等容量释放或调度安排</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+              {myBookings.length === 0 && <tr><td colSpan={6} className="muted">暂无转运预约</td></tr>}
+            </tbody>
+          </table>
+          <div className="muted small">
+            规则：过磅实称才计入转运站“已卸实收”，估重只用于锁窗；实称超窗口余量将被拒（不超售）。
+            排队模式下等多久取决于前车过磅，事前不可知。
+          </div>
         </div>
 
         <div className="panel">
@@ -248,6 +350,25 @@ export function DriverView({ snap, account }: { snap: Snapshot; account: Account
             <div className="btn-row">
               <button className="btn primary" onClick={doWeigh}>提交实称重量</button>
               <button className="btn" onClick={() => setWeighFor(null)}>取消</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 转运站过磅弹窗 */}
+      {weighBooking && (
+        <div className="modal-mask" onClick={() => setWeighBooking(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h4>转运站过磅 · {weighBooking.id}</h4>
+            <p className="muted">
+              预约估重 {weighBooking.estTon.toFixed(1)} 吨（估重不登记为实收）。
+              过磅实称才计入窗口“已卸实收”；实称超窗口余量将被拒（不超售）。
+            </p>
+            <input className="input" type="number" step="0.1" min="0" value={weighBookingTon}
+              onChange={(e) => setWeighBookingTon(e.target.value)} />
+            <div className="btn-row">
+              <button className="btn primary" onClick={doWeighTransfer}>提交过磅实称</button>
+              <button className="btn" onClick={() => setWeighBooking(null)}>取消</button>
             </div>
           </div>
         </div>

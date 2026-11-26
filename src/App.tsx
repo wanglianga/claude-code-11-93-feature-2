@@ -8,9 +8,10 @@ import { Login } from './components/Login';
 import { DispatcherView } from './components/DispatcherView';
 import { DriverView } from './components/DriverView';
 import { CsView } from './components/CsView';
+import { MasterView } from './components/MasterView';
 
 const SESSION_KEY = 'sw-session';
-const ROLE_NAME: Record<string, string> = { dispatcher: '调度员', driver: '司机', cs: '客服' };
+const ROLE_NAME: Record<string, string> = { dispatcher: '调度员', driver: '司机', cs: '客服', master: '站长' };
 
 function Shell() {
   const { snap } = useWorld();
@@ -52,6 +53,7 @@ function Shell() {
         {account.role === 'dispatcher' && <DispatcherView snap={snap} account={account} />}
         {account.role === 'driver' && <DriverView snap={snap} account={account} />}
         {account.role === 'cs' && <CsView snap={snap} account={account} />}
+        {account.role === 'master' && <MasterView snap={snap} account={account} />}
       </main>
     </div>
   );

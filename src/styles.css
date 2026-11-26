@@ -157,3 +157,23 @@ main { padding: 14px; }
 .loading { padding: 40px; text-align: center; color: #64748b; }
 .actions { white-space: nowrap; }
 .actions .btn { margin-right: 4px; }
+
+/* ===================== 转运站窗口预约 ===================== */
+.transfer-board { border-top: 1px dashed #e2e8f0; padding-top: 8px; margin-top: 8px; }
+.transfer-board:first-of-type { border-top: none; margin-top: 0; padding-top: 0; }
+.window-block { border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
+.window-block.suspended { border-color: #fca5a5; background: #fff7f7; }
+
+.ledger { margin: 6px 0; }
+.ledger-bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: #e2e8f0; }
+.ledger-recv { background: #16a34a; height: 100%; }
+.ledger-lock { background: repeating-linear-gradient(45deg, #3b82f6, #3b82f6 4px, #60a5fa 4px, #60a5fa 8px); height: 100%; }
+.ledger-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 4px; color: #475569; }
+.ledger-legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
+.ledger-legend .dot.recv { background: #16a34a; }
+.ledger-legend .dot.lock { background: #3b82f6; }
+
+.input.mini { width: 76px; padding: 4px 6px; }
+.instr-panel { border-color: #fdba74; background: #fff7ed; }
+.alert.instr { margin: 6px 0; }
+.rules { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }

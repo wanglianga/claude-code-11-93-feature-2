@@ -149,6 +149,25 @@ export function MapView({ snap }: { snap: Snapshot }) {
               </g>
             );
           }
+          if (n.kind === 'transfer') {
+            const t = snap.transferStations.find((x) => x.nodeId === n.id);
+            const suspended = t?.windows.some((w) => w.suspended);
+            return (
+              <g key={n.id}>
+                <rect x={n.x - 13} y={n.y - 13} width="26" height="26" rx="4"
+                  fill={suspended ? '#dc2626' : '#7c3aed'} stroke="#fff" strokeWidth="2"
+                  transform={`rotate(45 ${n.x} ${n.y})`} />
+                <text x={n.x} y={n.y + 4} fontSize="10" textAnchor="middle" fill="#fff" fontWeight="700">{n.id}</text>
+                <text x={n.x} y={n.y + 30} fontSize="10" textAnchor="middle" fill="#0f172a" fontWeight="600">
+                  {t?.name ?? n.name}{suspended ? '（停收）' : ''}
+                </text>
+                <text x={n.x} y={n.y + 42} fontSize="9" textAnchor="middle" fill="#64748b">
+                  {t ? t.windows.map((w) => `${w.id} ${fmtMin(w.startMin)}–${fmtMin(w.endMin)} ${w.capacityTon.toFixed(1)}t`).join(' ') : ''}
+                  {t ? ` · ${t.mode === 'lock' ? '锁量' : '排队'}` : ''}
+                </text>
+              </g>
+            );
+          }
           return (
             <g key={n.id}>
               <circle cx={n.x} cy={n.y} r={n.kind === 'depot' ? 8 : 4} fill={n.kind === 'depot' ? '#475569' : '#94a3b8'} />

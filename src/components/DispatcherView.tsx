@@ -1,4 +1,4 @@
-// 调度员工作台：地图 + 路线清单 + 限行/封闭管理 + 双方案重排 + 演示事件
+// 调度员工作台：地图 + 路线清单 + 限行/封闭管理 + 双方案重排 + 转运站队列 + 演示事件
 import React, { useMemo, useState } from 'react';
 import type { Snapshot } from '../lib/db';
 import type { Account } from '../types';
@@ -7,10 +7,13 @@ import {
   advanceClock, applyPlan, buildPlanPayload, computeRouteEvals, currentVersionByVehicle,
   demoDumpEarlyClose, demoOldDriverLateReceipt, liftClosure, resetDemo, setClock,
 } from '../lib/actions';
+import { toggleWindowSuspend } from '../lib/transfer';
 import { runPlanInWorker } from '../lib/plannerClient';
 import type { PlanResult } from '../lib/planner';
 import { MapView } from './MapView';
 import { PlanCompare } from './PlanCompare';
+import { ModeComparePanel } from './ModeComparePanel';
+import { TransferDispatchPanel } from './TransferBoard';
 import { EventLogPanel, StationBadge, VersionTracePanel, VEHICLE_COLORS } from './Shared';
 import { BRIDGE_CLOSE_TO } from '../lib/seed';
 
@@ -136,6 +139,8 @@ export function DispatcherView({ snap, account }: { snap: Snapshot; account: Acc
         )}
         {appliedNote && <div className="panel ok-panel">{appliedNote}</div>}
 
+        <ModeComparePanel />
+
         <VersionTracePanel versions={snap.routeVersions} />
         <EventLogPanel events={snap.events} />
       </div>
@@ -151,6 +156,8 @@ export function DispatcherView({ snap, account }: { snap: Snapshot; account: Acc
           </button>
           {unfinishedCount === 0 && <div className="ok small">全部站点已履约，无需重排。</div>}
         </div>
+
+        <TransferDispatchPanel snap={snap} account={account} />
 
         <div className="panel demo">
           <h3>演示与验证（一键注入题目输入）</h3>
@@ -168,6 +175,21 @@ export function DispatcherView({ snap, account }: { snap: Snapshot; account: Acc
           </button>
           <button className="btn block" onClick={async () => { await setClock(BRIDGE_CLOSE_TO, account.name, '时钟推进至 10:15，清河桥封闭解除'); setDemoMsg('时钟已到 10:15，桥梁封闭自动失效'); }}>
             ④ 演示事件：时钟推进到 10:15（封路解除）
+          </button>
+          <button className="btn block" onClick={async () => { await setClock(600, account.name, '时钟推进至 10:00，城西转运站 W1 窗口开启'); setDemoMsg('时钟已到 10:00：城西转运站 W1 窗口开启（10:00–10:30，4 吨）。司机可到场过磅：T1 实称 1.8 吨后释放 0.7 吨锁量，T2 即可补锁'); }}>
+            ⑤ 演示事件：时钟推进到 10:00（转运窗口开启）
+          </button>
+          <button className="btn block" onClick={async () => {
+            const w = snap.transferStations.find((s) => s.id === 'TS1')?.windows.find((x) => x.id === 'W1');
+            if (w?.suspended) {
+              await toggleWindowSuspend(snap, 'TS1', 'W1', false, '', account.name);
+              setDemoMsg('城西转运站 W1 已恢复接收');
+            } else {
+              await toggleWindowSuspend(snap, 'TS1', 'W1', true, '设备临时检修（演示注入）', account.name);
+              setDemoMsg('已注入：城西转运站 W1 临时停收——在途预约成为线路上的真实阻塞，请在上方“转运站队列与受影响站点”中安排等待或改道');
+            }
+          }}>
+            ⑥ 演示事件：城西转运站 W1 临时停收 / 恢复
           </button>
           <button className="btn block" onClick={() => advanceClock(5, account.name)}>时钟 +5 分钟</button>
           {demoMsg && <div className="demo-msg">{demoMsg}</div>}

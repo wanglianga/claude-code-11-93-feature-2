@@ -1,6 +1,6 @@
 // 共享 UI 小组件：状态徽章、事件日志、版本追溯
 import React from 'react';
-import type { EventLog, NotificationStatus, RouteVersion, StationStatus } from '../types';
+import type { BookingStatus, EventLog, NotificationStatus, RouteVersion, StationStatus } from '../types';
 import { fmtMin } from '../types';
 
 export const VEHICLE_COLORS: Record<string, string> = {
@@ -35,6 +35,24 @@ export function NotifBadge({ status }: { status: NotificationStatus }) {
   const [text, cls] = map[status];
   return <span className={cls}>{text}</span>;
 }
+
+export function BookingBadge({ status }: { status: BookingStatus }) {
+  const map: Record<BookingStatus, [string, string]> = {
+    booked: ['已登记', 'badge gray'],
+    locked: ['已锁窗', 'badge blue'],
+    blocked: ['被挡', 'badge orange'],
+    queued: ['排队中', 'badge indigo'],
+    weighed: ['已过磅', 'badge green'],
+    diverted: ['已改道', 'badge gray'],
+  };
+  const [text, cls] = map[status];
+  return <span className={cls}>{text}</span>;
+}
+
+export const MODE_NAME: Record<string, string> = {
+  lock: '锁量模式（按预计吨位先锁窗）',
+  queue: '到场排队（过磅后才扣实际容量）',
+};
 
 export function EventLogPanel({ events }: { events: EventLog[] }) {
   const sorted = events.slice().sort((a, b) => (b.id ?? 0) - (a.id ?? 0)).slice(0, 80);

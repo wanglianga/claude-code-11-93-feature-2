@@ -1,8 +1,8 @@
-// 随题固定的虚构演示数据：路网、车辆、桶站、卸载点、居民预约通知
+// 随题固定的虚构演示数据：路网、车辆、桶站、卸载点、居民预约通知、转运站窗口与预约
 // 全部 deterministic，可通过“重置并重放”随时恢复到 09:20 封路通知到达的现场。
 import type {
-  Account, Closure, DumpSite, EventLog, NodeDef, NotificationDoc,
-  Road, RouteVersion, Station, Vehicle,
+  Account, Booking, Closure, DumpSite, EventLog, NodeDef, NotificationDoc,
+  Road, RouteVersion, Station, TransferStation, Vehicle,
 } from '../types';
 
 export const START_MIN = 560; // 09:20，封路通知到达
@@ -14,6 +14,7 @@ export const ACCOUNTS: Account[] = [
   { id: 'D01', username: 'driver1', password: 'drv123', name: '老王', role: 'driver', vehicleId: 'T1' },
   { id: 'D02', username: 'driver2', password: 'drv123', name: '小李', role: 'driver', vehicleId: 'T2' },
   { id: 'U-CS', username: 'service', password: 'svc123', name: '陈客服', role: 'cs' },
+  { id: 'U-MST', username: 'master', password: 'mst123', name: '赵站长', role: 'master' },
 ];
 
 export const NODES: NodeDef[] = [
@@ -25,6 +26,8 @@ export const NODES: NodeDef[] = [
   { id: 'S3', name: '朝阳小区站', x: 580, y: 300, kind: 'station' },
   { id: 'S4', name: '河湾花园站', x: 710, y: 370, kind: 'station' },
   { id: 'D1', name: '城东卸载点', x: 740, y: 90, kind: 'dump' },
+  { id: 'TS1', name: '城西转运站', x: 610, y: 470, kind: 'transfer' },
+  { id: 'TS2', name: '城北转运站', x: 560, y: 60, kind: 'transfer' },
 ];
 
 export const ROADS: Road[] = [
@@ -65,6 +68,15 @@ export const ROADS: Road[] = [
   { id: 'R-D1-P2', group: 'G-P2D1', from: 'D1', to: 'P2', minutes: 14 },
   { id: 'R-DEP-D1', group: 'G-DEPD1', from: 'DEPOT', to: 'D1', minutes: 18 },
   { id: 'R-D1-DEP', group: 'G-DEPD1', from: 'D1', to: 'DEPOT', minutes: 18 },
+  // 转运站进出
+  { id: 'R-S4-TS1', group: 'G-S4TS1', from: 'S4', to: 'TS1', minutes: 8 },
+  { id: 'R-TS1-S4', group: 'G-S4TS1', from: 'TS1', to: 'S4', minutes: 8 },
+  { id: 'R-P2-TS1', group: 'G-P2TS1', from: 'P2', to: 'TS1', minutes: 12 },
+  { id: 'R-TS1-P2', group: 'G-P2TS1', from: 'TS1', to: 'P2', minutes: 12 },
+  { id: 'R-TS1-TS2', group: 'G-TS1TS2', from: 'TS1', to: 'TS2', minutes: 15 },
+  { id: 'R-TS2-TS1', group: 'G-TS1TS2', from: 'TS2', to: 'TS1', minutes: 15 },
+  { id: 'R-D1-TS2', group: 'G-D1TS2', from: 'D1', to: 'TS2', minutes: 10 },
+  { id: 'R-TS2-D1', group: 'G-D1TS2', from: 'TS2', to: 'D1', minutes: 10 },
 ];
 
 export const CLOSURES: Closure[] = [
@@ -149,9 +161,42 @@ export const NOTIFICATIONS: NotificationDoc[] = [
   },
 ];
 
+// ===================== 转运站窗口预约（本题固定数据） =====================
+// 城西转运站只剩 10:00–10:30 一个窗口、可接收 4 吨；
+// T1 预约估重 2.5 吨（过磅实际 1.8 吨）、T2 预约估重 2.0 吨。
+// 锁量模式下 T1 先锁 2.5t → 剩余 1.5t < T2 的 2.0t → T2 暂时被挡。
+export const TRANSFER_STATIONS: TransferStation[] = [
+  {
+    id: 'TS1', name: '城西转运站', nodeId: 'TS1', mode: 'lock', weighMin: 4,
+    windows: [
+      { id: 'W1', startMin: 600, endMin: 630, capacityTon: 4.0, suspended: false }, // 10:00–10:30
+    ],
+  },
+  {
+    id: 'TS2', name: '城北转运站', nodeId: 'TS2', mode: 'lock', weighMin: 4,
+    windows: [
+      { id: 'W2', startMin: 570, endMin: 720, capacityTon: 8.0, suspended: false }, // 09:30–12:00（改道备选）
+    ],
+  },
+];
+
+export const BOOKINGS: Booking[] = [
+  {
+    id: 'BK-T1', stationId: 'TS1', windowId: 'W1', vehicleId: 'T1',
+    estTon: 2.5, status: 'locked', createdAtMin: 560,
+    note: '按随车清单估重 2.5 吨锁窗（估重不是实收）',
+  },
+  {
+    id: 'BK-T2', stationId: 'TS1', windowId: 'W1', vehicleId: 'T2',
+    estTon: 2.0, status: 'blocked', createdAtMin: 560,
+    note: '剩余可锁 1.5 吨 < 估 2.0 吨，暂未锁入：等 T1 过磅释放或改道',
+  },
+];
+
 export const SEED_EVENTS: EventLog[] = [
   { tsMin: 540, actor: '系统', type: 'init', message: '早班排线完成：T1=[S1,S2]，T2=[S3,S4]（版本 RV-T1-1 / RV-T2-1）' },
   { tsMin: 560, actor: '路政', type: 'closure', message: '09:20 清河桥封闭至 10:15，T1 无法按原顺序前往 S2（S2 截止 10:00）' },
+  { tsMin: 560, actor: '系统', type: 'transfer', message: '城西转运站 W1 仅剩 10:00–10:30 窗口（可接收 4.0 吨）：T1 已锁 2.5 吨（估），T2 估 2.0 吨暂未锁入（被挡）' },
 ];
 
 export function credentialOf(stationId: string): string {
